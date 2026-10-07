@@ -1,0 +1,44 @@
+name: Destroy
+# Destrutivo: exige confirmação por input e aprovação no Environment "destroy".
+# Ordem entre repos: este é o primeiro a ser destruído (LAMBDA → DB → K8S). A Lambda de busca de
+# clientes fica na VPC do repo K8S e tem uma regra no SG do RDS do repo DB.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Digite "destroy" para confirmar a remoção das Lambdas'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # Falha visível em vez de um run "verde" que não destruiu nada
+  reject:
+    if: inputs.confirm != 'destroy' || github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::Destroy não executado: informe confirm=destroy e rode a partir da branch main."
+          exit 1
+
+  gate:
+    if: inputs.confirm == 'destroy' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: destroy
+    steps:
+      - run: echo "Destroy das Lambdas aprovado"
+
+  delete:
+    needs: gate
+    strategy:
+      max-parallel: 1
+      matrix:
+        app: [authorizer-app, issuer-token-app]
+    uses: ./.github/workflows/_sam.yml
+    with:
+      app: ${{ matrix.app }}
+      command: delete
+    secrets: inherit

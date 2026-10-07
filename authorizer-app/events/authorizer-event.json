@@ -1,0 +1,37 @@
+{
+  "version": "2.0",
+  "type": "REQUEST",
+  "routeArn": "arn:aws:execute-api:us-east-1:123456789012:abcdef1234/$default/GET/monolith/api/clientes",
+  "identitySource": [
+    "Bearer COLE_AQUI_UM_JWT"
+  ],
+  "routeKey": "ANY /monolith/{proxy+}",
+  "rawPath": "/monolith/api/clientes",
+  "rawQueryString": "",
+  "headers": {
+    "authorization": "Bearer COLE_AQUI_UM_JWT",
+    "host": "abcdef1234.execute-api.us-east-1.amazonaws.com",
+    "user-agent": "curl/8.0"
+  },
+  "requestContext": {
+    "accountId": "123456789012",
+    "apiId": "abcdef1234",
+    "domainName": "abcdef1234.execute-api.us-east-1.amazonaws.com",
+    "domainPrefix": "abcdef1234",
+    "http": {
+      "method": "GET",
+      "path": "/monolith/api/clientes",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "203.0.113.10",
+      "userAgent": "curl/8.0"
+    },
+    "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+    "routeKey": "ANY /monolith/{proxy+}",
+    "stage": "$default",
+    "time": "07/Oct/2026:12:00:00 +0000",
+    "timeEpoch": 1791374400000
+  },
+  "pathParameters": {
+    "proxy": "api/clientes"
+  }
+}

@@ -1,0 +1,43 @@
+name: Deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - "authorizer-app/**"
+      - "issuer-token-app/**"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/_sam.yml"
+  # Redeploy manual: primeira publicação, ou depois de recriar o RDS (repo DB) ou a VPC (repo K8S)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # PR: testes, lint e build dos dois apps, sem credenciais AWS
+  validate:
+    if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        app: [authorizer-app, issuer-token-app]
+    uses: ./.github/workflows/_sam.yml
+    with:
+      app: ${{ matrix.app }}
+      command: validate
+
+  # Push na main ou manual: testes, build e deploy dos dois stacks.
+  # Um por vez: na primeira execução, o SAM cria o bucket de artefatos (resolve_s3) e não pode haver corrida
+  deploy:
+    if: github.event_name != 'pull_request'
+    strategy:
+      max-parallel: 1
+      matrix:
+        app: [authorizer-app, issuer-token-app]
+    uses: ./.github/workflows/_sam.yml
+    with:
+      app: ${{ matrix.app }}
+      command: deploy
+    secrets: inherit

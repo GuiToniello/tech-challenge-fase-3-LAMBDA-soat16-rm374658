@@ -1,0 +1,513 @@
+{
+  "info": {
+    "_postman_id": "c0d4c1e5-5f2a-4f7e-9b1d-7a4e3c2b1a01",
+    "name": "TechChallenge Oficina - Auth (Lambdas)",
+    "description": "Demonstra o authorizer e a geração do JWT pela Lambda (POST /auth/token) passando pelo API Gateway. Preencha gatewayUrl com o output api_gateway_endpoint do repo K8S e rode na ordem.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 - Health sem token (200)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{gatewayUrl}}/monolith/health",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "monolith",
+            "health"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Rota protegida sem token (401)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{gatewayUrl}}/monolith/api/clientes",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "monolith",
+            "api",
+            "clientes"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 401', function () { pm.response.to.have.status(401); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Auth0 - Token direto, sem CPF (200)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "url": {
+          "raw": "https://{{auth0_domain}}/oauth/token",
+          "protocol": "https",
+          "host": [
+            "{{auth0_domain}}"
+          ],
+          "path": [
+            "oauth",
+            "token"
+          ]
+        },
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "password",
+              "type": "text"
+            },
+            {
+              "key": "client_id",
+              "value": "{{auth0_client_id}}",
+              "type": "text"
+            },
+            {
+              "key": "username",
+              "value": "{{auth0_username}}",
+              "type": "text"
+            },
+            {
+              "key": "password",
+              "value": "{{auth0_password}}",
+              "type": "text"
+            },
+            {
+              "key": "audience",
+              "value": "{{auth0_audience}}",
+              "type": "text"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "function decodificarJwt(token) {",
+              "  const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');",
+              "  return JSON.parse(atob(payload.padEnd(payload.length + (4 - payload.length % 4) % 4, '=')));",
+              "}",
+              "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+              "const token = pm.response.json().access_token;",
+              "pm.test('Token direto do Auth0 nao tem a claim cpf', function () {",
+              "  pm.expect(decodificarJwt(token)).to.not.have.property('cpf');",
+              "});",
+              "pm.collectionVariables.set('auth0_access_token', token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Token sem CPF fora do cadastro (403)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{auth0_access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{gatewayUrl}}/monolith/api/clientes",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "monolith",
+            "api",
+            "clientes"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 403', function () { pm.response.to.have.status(403); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Cadastrar Cliente com token sem CPF (201)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{auth0_access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayUrl}}/monolith/api/clientes",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "monolith",
+            "api",
+            "clientes"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nomeCompleto\": \"Cliente Token Lambda\",\n  \"identificacao\": \"{{cpf_cliente}}\",\n  \"email\": \"{{auth0_username}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "function gerarCpfValido() {",
+              "  const base = [];",
+              "  for (let i = 0; i < 9; i++) base.push(Math.floor(Math.random() * 10));",
+              "  let soma = 0;",
+              "  for (let i = 0; i < 9; i++) soma += base[i] * (10 - i);",
+              "  let resto = soma % 11;",
+              "  const d1 = resto < 2 ? 0 : 11 - resto;",
+              "  soma = 0;",
+              "  for (let i = 0; i < 9; i++) soma += base[i] * (11 - i);",
+              "  soma += d1 * 2;",
+              "  resto = soma % 11;",
+              "  const d2 = resto < 2 ? 0 : 11 - resto;",
+              "  return [...base, d1, d2].join('');",
+              "}",
+              "const cpfCliente = gerarCpfValido();",
+              "let cpfNaoCadastrado = gerarCpfValido();",
+              "while (cpfNaoCadastrado === cpfCliente) cpfNaoCadastrado = gerarCpfValido();",
+              "pm.collectionVariables.set('cpf_cliente', cpfCliente);",
+              "pm.collectionVariables.set('cpf_nao_cadastrado', cpfNaoCadastrado);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 201', function () { pm.response.to.have.status(201); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - Lambda - CPF invalido (400)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayUrl}}/auth/token",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "auth",
+            "token"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{auth0_username}}\",\n  \"senha\": \"{{auth0_password}}\",\n  \"cpf\": \"12345678900\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 400', function () { pm.response.to.have.status(400); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 - Lambda - CPF nao cadastrado (404)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayUrl}}/auth/token",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "auth",
+            "token"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{auth0_username}}\",\n  \"senha\": \"{{auth0_password}}\",\n  \"cpf\": \"{{cpf_nao_cadastrado}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 404', function () { pm.response.to.have.status(404); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 - Lambda - Senha errada (401)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayUrl}}/auth/token",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "auth",
+            "token"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{auth0_username}}\",\n  \"senha\": \"senha-errada\",\n  \"cpf\": \"{{cpf_cliente}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 401', function () { pm.response.to.have.status(401); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 - Lambda - Gerar JWT com CPF (200)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{gatewayUrl}}/auth/token",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "auth",
+            "token"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{auth0_username}}\",\n  \"senha\": \"{{auth0_password}}\",\n  \"cpf\": \"{{cpf_cliente}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "function decodificarJwt(token) {",
+              "  const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');",
+              "  return JSON.parse(atob(payload.padEnd(payload.length + (4 - payload.length % 4) % 4, '=')));",
+              "}",
+              "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+              "const token = pm.response.json().access_token;",
+              "pm.test('JWT tem a claim cpf do cliente cadastrado', function () {",
+              "  pm.expect(decodificarJwt(token).cpf).to.eql(pm.collectionVariables.get('cpf_cliente'));",
+              "});",
+              "pm.collectionVariables.set('jwt_cpf', token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 - Listar Clientes com o JWT da Lambda (200)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{jwt_cpf}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{gatewayUrl}}/monolith/api/clientes",
+          "host": [
+            "{{gatewayUrl}}"
+          ],
+          "path": [
+            "monolith",
+            "api",
+            "clientes"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status 200', function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "gatewayUrl",
+      "value": "https://SEU-API-ID.execute-api.us-east-1.amazonaws.com"
+    },
+    {
+      "key": "auth0_domain",
+      "value": "dev-mesy5gadx7cqn4i0.us.auth0.com"
+    },
+    {
+      "key": "auth0_client_id",
+      "value": "VJNHFAcEAUxr7D0PgmFA8paa01zSpj5C"
+    },
+    {
+      "key": "auth0_username",
+      "value": "guitoniello@gmail.com"
+    },
+    {
+      "key": "auth0_password",
+      "value": "P@ssw0rd"
+    },
+    {
+      "key": "auth0_audience",
+      "value": "http://localhost:7194"
+    },
+    {
+      "key": "auth0_access_token",
+      "value": ""
+    },
+    {
+      "key": "cpf_cliente",
+      "value": ""
+    },
+    {
+      "key": "cpf_nao_cadastrado",
+      "value": ""
+    },
+    {
+      "key": "jwt_cpf",
+      "value": ""
+    }
+  ]
+}

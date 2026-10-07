@@ -4,6 +4,7 @@ version = 0.1
 
 [default.global.parameters]
 stack_name = "authorizer-app"
+region = "us-east-1"
 
 [default.build.parameters]
 cached = true
@@ -16,6 +17,8 @@ lint = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
+# Deploy local: valores em params.yaml (copie de params.example.yaml). O CI passa --parameter-overrides, que tem precedência
+parameter_overrides = "file://params.yaml"
 
 [default.package.parameters]
 resolve_s3 = true

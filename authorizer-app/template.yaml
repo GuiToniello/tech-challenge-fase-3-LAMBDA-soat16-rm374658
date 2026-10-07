@@ -1,44 +1,52 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Sample SAM Template for authorizer-app
+  Lambda authorizer do API Gateway (HTTP API do repo K8S). Exige JWT valido do Auth0 com a
+  claim cpf; as rotas de RotasSemCpf (cadastro de cliente) aceitam JWT valido sem a claim.
 
-# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
-Globals:
-  Function:
-    Timeout: 10
-    MemorySize: 512
+Parameters:
+  Auth0Domain:
+    Type: String
+    Description: Dominio do tenant Auth0, sem https:// (ex. dev-xxxx.us.auth0.com)
+  Auth0Audience:
+    Type: String
+    Description: Audience (identifier) da API no Auth0
+  RotasSemCpf:
+    Type: String
+    Default: POST /monolith/api/clientes
+    Description: Rotas "METODO /path", separadas por virgula, que aceitam JWT sem a claim cpf
 
 Resources:
-  HelloWorldFunction:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ./src/HelloWorld/
-      Handler: HelloWorld::HelloWorld.Function::FunctionHandler
+      # Nome fixo: o authorizer do API Gateway (repo K8S) referencia a funcao por ele
+      FunctionName: techchallenge-oficina-authorizer
+      CodeUri: ./src/Authorizer/
+      Handler: Authorizer::Authorizer.Function::FunctionHandler
       Runtime: dotnet10
       Architectures:
         - x86_64
       MemorySize: 512
-      Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
+      # O API Gateway espera o authorizer por no maximo 10 s
+      Timeout: 10
+      Environment:
         Variables:
-          PARAM1: VALUE
-      Events:
-        HelloWorld:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
-          Properties:
-            Path: /hello
-            Method: get
+          AUTH0_DOMAIN: !Ref Auth0Domain
+          AUTH0_AUDIENCE: !Ref Auth0Audience
+          ROTAS_SEM_CPF: !Ref RotasSemCpf
+
+  # Permite que o API Gateway invoque o authorizer. O id da API fica com curinga porque muda
+  # sempre que o repo K8S recria o ambiente
+  AuthorizerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AuthorizerFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*
 
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  HelloWorldApi:
-    Description: "API Gateway endpoint URL for Prod stage for Hello World function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/hello/"
-  HelloWorldFunction:
-    Description: "Hello World Lambda Function ARN"
-    Value: !GetAtt HelloWorldFunction.Arn
-  HelloWorldFunctionIamRole:
-    Description: "Implicit IAM Role created for Hello World function"
-    Value: !GetAtt HelloWorldFunctionRole.Arn
+  AuthorizerFunctionArn:
+    Description: ARN do Lambda authorizer
+    Value: !GetAtt AuthorizerFunction.Arn

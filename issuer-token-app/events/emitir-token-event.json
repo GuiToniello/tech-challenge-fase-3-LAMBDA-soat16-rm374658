@@ -1,0 +1,31 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /auth/token",
+  "rawPath": "/auth/token",
+  "rawQueryString": "",
+  "headers": {
+    "content-type": "application/json",
+    "host": "abcdef1234.execute-api.us-east-1.amazonaws.com",
+    "user-agent": "curl/8.0"
+  },
+  "requestContext": {
+    "accountId": "123456789012",
+    "apiId": "abcdef1234",
+    "domainName": "abcdef1234.execute-api.us-east-1.amazonaws.com",
+    "domainPrefix": "abcdef1234",
+    "http": {
+      "method": "POST",
+      "path": "/auth/token",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "203.0.113.10",
+      "userAgent": "curl/8.0"
+    },
+    "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+    "routeKey": "POST /auth/token",
+    "stage": "$default",
+    "time": "07/Oct/2026:12:00:00 +0000",
+    "timeEpoch": 1791374400000
+  },
+  "body": "{\"email\":\"cliente@exemplo.com\",\"senha\":\"SenhaDoAuth0\",\"cpf\":\"529.982.247-25\"}",
+  "isBase64Encoded": false
+}

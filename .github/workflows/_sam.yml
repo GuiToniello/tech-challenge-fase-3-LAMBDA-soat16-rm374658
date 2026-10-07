@@ -1,0 +1,132 @@
+name: "[Reusable] SAM"
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: "Pasta do app SAM (authorizer-app ou issuer-token-app)"
+        required: true
+        type: string
+      command:
+        description: "validate (testes, lint e build, sem AWS), deploy ou delete"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sam:
+    runs-on: ubuntu-latest
+    # O delete espera a AWS liberar as interfaces de rede da Lambda na VPC (pode levar de 20 a 40 minutos)
+    timeout-minutes: 60
+    concurrency:
+      # Fora da main, deploy/delete usam um grupo próprio: falham no bloqueio abaixo sem cancelar um job legítimo pendente
+      group: ${{ (inputs.command == 'deploy' || inputs.command == 'delete') && (github.ref == 'refs/heads/main' && format('sam-{0}', inputs.app) || format('sam-blocked-{0}', github.run_id)) || format('sam-{0}-{1}-{2}', inputs.app, inputs.command, github.ref) }}
+      cancel-in-progress: ${{ inputs.command == 'validate' }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.app }}
+    steps:
+      # deploy/delete só a partir da main, mesmo quando disparados manualmente em outra branch
+      - name: Bloquear deploy/delete fora da main
+        if: (inputs.command == 'deploy' || inputs.command == 'delete') && github.ref != 'refs/heads/main'
+        env:
+          COMMAND: ${{ inputs.command }}
+        run: |
+          echo "::error::$COMMAND só pode rodar a partir da branch main (ref atual: $GITHUB_REF)"
+          exit 1
+        working-directory: .
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        if: inputs.command != 'delete'
+        with:
+          dotnet-version: "10.0.x"
+
+      # Mesma versão do SAM CLI usada localmente (suporta o runtime dotnet10)
+      - uses: aws-actions/setup-sam@v2
+        with:
+          version: 1.167.0
+          use-installer: true
+
+      - name: Testes
+        if: inputs.command != 'delete'
+        run: dotnet test test/*
+
+      # Lint offline (cfn-lint): não precisa de credenciais AWS
+      - name: SAM validate
+        if: inputs.command != 'delete'
+        run: sam validate --lint
+
+      - name: SAM build
+        if: inputs.command != 'delete'
+        run: sam build
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        if: inputs.command != 'validate'
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Valores passados por env (não interpolados no script), para caracteres especiais não serem interpretados
+      - name: Deploy authorizer-app
+        if: inputs.command == 'deploy' && inputs.app == 'authorizer-app'
+        env:
+          AUTH0_DOMAIN: ${{ vars.AUTH0_DOMAIN }}
+          AUTH0_AUDIENCE: ${{ vars.AUTH0_AUDIENCE }}
+        run: |
+          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --region "$AWS_REGION" \
+            --parameter-overrides "Auth0Domain=$AUTH0_DOMAIN" "Auth0Audience=$AUTH0_AUDIENCE"
+
+      # Contrato do repo DB: endpoint, banco, usuário, VPC, subnets e SG descobertos pelo identifier fixo do RDS
+      - name: Descobrir RDS
+        if: inputs.command == 'deploy' && inputs.app == 'issuer-token-app'
+        id: rds
+        env:
+          RDS_INSTANCE_IDENTIFIER: ${{ vars.RDS_INSTANCE_IDENTIFIER }}
+        run: |
+          rds=$(aws rds describe-db-instances --db-instance-identifier "$RDS_INSTANCE_IDENTIFIER" \
+            --query "DBInstances[0].[Endpoint.Address, DBName, MasterUsername, DBSubnetGroup.VpcId, join(',', DBSubnetGroup.Subnets[].SubnetIdentifier), VpcSecurityGroups[0].VpcSecurityGroupId]" \
+            --output text 2>/dev/null || true)
+          read -r host database username vpc subnets sg <<< "$rds"
+          if [ -z "$host" ] || [ "$host" = "None" ]; then
+            echo "::error::O RDS $RDS_INSTANCE_IDENTIFIER não existe ou ainda não tem endpoint. Rode o Bootstrap do repo DB e aguarde a instância ficar disponível."
+            exit 1
+          fi
+          {
+            echo "host=$host"
+            echo "database=$database"
+            echo "username=$username"
+            echo "vpc=$vpc"
+            echo "subnets=$subnets"
+            echo "sg=$sg"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy issuer-token-app
+        if: inputs.command == 'deploy' && inputs.app == 'issuer-token-app'
+        env:
+          AUTH0_DOMAIN: ${{ vars.AUTH0_DOMAIN }}
+          AUTH0_AUDIENCE: ${{ vars.AUTH0_AUDIENCE }}
+          AUTH0_CLIENT_ID: ${{ vars.AUTH0_CLIENT_ID }}
+          AUTH0_CLIENT_SECRET: ${{ secrets.AUTH0_CLIENT_SECRET }}
+          RDS_PASSWORD: ${{ secrets.RDS_PASSWORD }}
+          DB_HOST: ${{ steps.rds.outputs.host }}
+          DB_NAME: ${{ steps.rds.outputs.database }}
+          DB_USERNAME: ${{ steps.rds.outputs.username }}
+          VPC_ID: ${{ steps.rds.outputs.vpc }}
+          SUBNET_IDS: ${{ steps.rds.outputs.subnets }}
+          RDS_SG_ID: ${{ steps.rds.outputs.sg }}
+        run: |
+          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset --region "$AWS_REGION" \
+            --parameter-overrides \
+              "Auth0Domain=$AUTH0_DOMAIN" "Auth0Audience=$AUTH0_AUDIENCE" \
+              "Auth0ClientId=$AUTH0_CLIENT_ID" "Auth0ClientSecret=$AUTH0_CLIENT_SECRET" \
+              "DbHost=$DB_HOST" "DbName=$DB_NAME" "DbUsername=$DB_USERNAME" "DbPassword=$RDS_PASSWORD" \
+              "VpcId=$VPC_ID" "SubnetIds=$SUBNET_IDS" "RdsSecurityGroupId=$RDS_SG_ID"
+
+      - name: SAM delete
+        if: inputs.command == 'delete'
+        run: sam delete --no-prompts --region "$AWS_REGION"

@@ -1,0 +1,9 @@
+# Parâmetros do "sam deploy" local (o SAM não lê .env; este YAML é o equivalente).
+# Copie para params.yaml (ignorado pelo Git) e ajuste. O samconfig.toml já aponta para params.yaml,
+# então depois é só rodar "sam build" e "sam deploy". No CI a pipeline passa os valores na linha de comando.
+
+Auth0Domain: dev-mesy5gadx7cqn4i0.us.auth0.com
+Auth0Audience: http://localhost:7194
+
+# Opcional (padrão do template): rotas que aceitam JWT sem a claim cpf, separadas por vírgula
+# RotasSemCpf: POST /monolith/api/clientes

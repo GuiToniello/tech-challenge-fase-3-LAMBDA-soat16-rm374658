@@ -1,44 +1,120 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Sample SAM Template for issuer-token-app
+  Geracao do JWT com a claim cpf (rota POST /auth/token do API Gateway do repo K8S).
+  EmitirToken fica fora da VPC e fala com o Auth0; BuscarCliente fica nas subnets privadas
+  (sem NAT) e so consulta o RDS.
 
-# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Parameters:
+  Auth0Domain:
+    Type: String
+    Description: Dominio do tenant Auth0, sem https:// (ex. dev-xxxx.us.auth0.com)
+  Auth0Audience:
+    Type: String
+    Description: Audience (identifier) da API no Auth0
+  Auth0ClientId:
+    Type: String
+    Description: Client ID da application do Auth0 (a mesma usada pelo Postman)
+  Auth0ClientSecret:
+    Type: String
+    NoEcho: true
+    Description: Client Secret da application, conferido pela Action post-login antes de gravar a claim cpf
+  DbHost:
+    Type: String
+    Description: Endpoint do RDS (repo DB)
+  DbName:
+    Type: String
+    Default: oficina
+  DbUsername:
+    Type: String
+    Default: sa
+  DbPassword:
+    Type: String
+    NoEcho: true
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC do RDS (criada pelo repo K8S)
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets privadas do DB subnet group do RDS
+  RdsSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: SG do RDS (techchallenge-oficina-rds-sg, repo DB)
+
+# So o que e comum as duas funcoes: VpcConfig e segredos ficam em cada funcao
 Globals:
   Function:
-    Timeout: 10
+    CodeUri: ./src/IssuerToken/
+    Runtime: dotnet10
+    Architectures:
+      - x86_64
     MemorySize: 512
+    Timeout: 15
 
 Resources:
-  HelloWorldFunction:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  # Nome fixo: o Destroy do repo K8S confere que este SG nao existe antes de remover a VPC
+  BuscarClienteSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      CodeUri: ./src/HelloWorld/
-      Handler: HelloWorld::HelloWorld.Function::FunctionHandler
-      Runtime: dotnet10
-      Architectures:
-        - x86_64
-      MemorySize: 512
-      Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
+      GroupName: techchallenge-oficina-lambda-sg
+      GroupDescription: Lambda buscar-cliente (acesso ao RDS)
+      VpcId: !Ref VpcId
+
+  # Regra propria do repo LAMBDA no SG do RDS (o repo DB usa regras avulsas para permitir isso)
+  RdsIngressFromBuscarCliente:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RdsSecurityGroupId
+      Description: PostgreSQL from Lambda buscar-cliente
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref BuscarClienteSecurityGroup
+
+  BuscarClienteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: techchallenge-oficina-buscar-cliente
+      Handler: IssuerToken::IssuerToken.BuscarClienteFunction::FunctionHandler
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref BuscarClienteSecurityGroup
+        SubnetIds: !Ref SubnetIds
+      Environment:
         Variables:
-          PARAM1: VALUE
-      Events:
-        HelloWorld:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
-          Properties:
-            Path: /hello
-            Method: get
+          DB_CONNECTION_STRING: !Sub Host=${DbHost};Port=5432;Database=${DbName};Username=${DbUsername};Password=${DbPassword}
+
+  EmitirTokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # Nome fixo: a rota POST /auth/token do API Gateway (repo K8S) referencia a funcao por ele
+      FunctionName: techchallenge-oficina-issue-token
+      Handler: IssuerToken::IssuerToken.EmitirTokenFunction::FunctionHandler
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref BuscarClienteFunction
+      Environment:
+        Variables:
+          AUTH0_DOMAIN: !Ref Auth0Domain
+          AUTH0_AUDIENCE: !Ref Auth0Audience
+          AUTH0_CLIENT_ID: !Ref Auth0ClientId
+          AUTH0_CLIENT_SECRET: !Ref Auth0ClientSecret
+          BUSCAR_CLIENTE_FUNCTION: !Ref BuscarClienteFunction
+
+  # Permite que o API Gateway invoque a funcao. O id da API fica com curinga porque muda
+  # sempre que o repo K8S recria o ambiente
+  EmitirTokenInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref EmitirTokenFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*
 
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  HelloWorldApi:
-    Description: "API Gateway endpoint URL for Prod stage for Hello World function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/hello/"
-  HelloWorldFunction:
-    Description: "Hello World Lambda Function ARN"
-    Value: !GetAtt HelloWorldFunction.Arn
-  HelloWorldFunctionIamRole:
-    Description: "Implicit IAM Role created for Hello World function"
-    Value: !GetAtt HelloWorldFunctionRole.Arn
+  EmitirTokenFunctionArn:
+    Description: ARN da funcao da rota POST /auth/token
+    Value: !GetAtt EmitirTokenFunction.Arn
+  BuscarClienteFunctionArn:
+    Description: ARN da funcao que consulta o RDS (dentro da VPC)
+    Value: !GetAtt BuscarClienteFunction.Arn
